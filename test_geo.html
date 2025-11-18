@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Geolocation Test</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+</head>
+<body style="font-family: -apple-system, system-ui; padding: 1rem;">
+  <h1>Geolocation Test</h1>
+  <button id="btn">Request location</button>
+  <pre id="log" style="white-space: pre-wrap; margin-top: 1rem;"></pre>
+
+  <script>
+    const btn = document.getElementById('btn');
+    const log = document.getElementById('log');
+
+    function write(msg) {
+      log.textContent += msg + "\n";
+    }
+
+    btn.addEventListener('click', () => {
+      if (!('geolocation' in navigator)) {
+        write('Geolocation not supported in this browser.');
+        return;
+      }
+
+      write('Calling watchPosition…');
+      navigator.geolocation.watchPosition(
+        pos => {
+          write('SUCCESS:');
+          write('  lat: ' + pos.coords.latitude);
+          write('  lon: ' + pos.coords.longitude);
+          write('  acc: ' + pos.coords.accuracy + ' m');
+        },
+        err => {
+          write('ERROR: ' + err.code + ' ' + err.message);
+        },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 1000,
+          timeout: 10000
+        }
+      );
+    });
+
+    // Optional: show permission state if supported
+    if (navigator.permissions && navigator.permissions.query) {
+      navigator.permissions.query({ name: 'geolocation' }).then(result => {
+        write('Initial permission state: ' + result.state);
+        result.onchange = () => write('Permission state changed to: ' + result.state);
+      }).catch(e => write('Permissions API error: ' + e));
+    } else {
+      write('Permissions API not supported.');
+    }
+  </script>
+</body>
+</html>

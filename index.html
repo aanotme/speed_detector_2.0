@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Speed Detector (C++/WASM)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { font-family: -apple-system, system-ui; padding: 1.5rem; background: #f4f4f5; }
+    .card { max-width: 480px; margin: 0 auto; background: #fff; border-radius: 1rem;
+            padding: 1.5rem; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+    h1 { font-size: 1.4rem; margin-bottom: 0.5rem; }
+    .value { font-size: 2.4rem; font-weight: 600; margin: 0.5rem 0; }
+    .sub { color: #555; }
+    .status { margin-top: 1rem; font-size: 0.9rem; color: #666; }
+    button { margin-top: 0.5rem; padding: 0.6rem 1rem; border-radius: 999px; border: none;
+             background: #2563eb; color: #fff; font-size: 0.95rem; }
+    button:disabled { opacity: 0.5; }
+    pre { font-size: 0.8rem; background: #111; color: #0f0; padding: 0.5rem; border-radius: 0.5rem;
+          max-height: 200px; overflow: auto; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <h1>Speed Detector (C++ → WASM)</h1>
+  <div class="sub">Tap start, allow location, then move.</div>
+  <div class="value" id="speed-kmh">0.0 km/h</div>
+  <div class="sub" id="speed-ms">0.0 m/s</div>
+  <div class="status" id="status">WASM loading…</div>
+  <button id="start-btn" disabled>Start tracking</button>
+  <button id="reset-btn">Reset</button>
+  <pre id="log"></pre>
+</div>
+
+<script>
+  const statusEl = document.getElementById('status');
+  const speedKmEl = document.getElementById('speed-kmh');
+  const speedMsEl = document.getElementById('speed-ms');
+  const startBtn = document.getElementById('start-btn');
+  const resetBtn = document.getElementById('reset-btn');
+  const logEl = document.getElementById('log');
+
+  function log(msg) {
+    logEl.textContent += msg + "\n";
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  // Show initial permission state if possible
+  if (navigator.permissions && navigator.permissions.query) {
+    navigator.permissions.query({ name: 'geolocation' }).then(result => {
+      log('Initial permission: ' + result.state);
+      result.onchange = () => log('Permission changed to: ' + result.state);
+    }).catch(e => log('Permissions API error: ' + e));
+  } else {
+    log('Permissions API not supported.');
+  }
+
+  var Module = {
+    onRuntimeInitialized: function () {
+      log('WASM runtime initialized.');
+
+      window.addSample  = Module.cwrap('add_sample',  'number', ['number','number','number']);
+      window.msToKmh    = Module.cwrap('ms_to_kmh',   'number', ['number']);
+      window.resetState = Module.cwrap('reset',       null,     []);
+
+      statusEl.textContent = 'WASM ready. Tap "Start tracking".';
+      startBtn.disabled = false;
+    }
+  };
+</script>
+<script src="speed.js"></script>
+<script>
+  function startGeolocation() {
+    if (!('geolocation' in navigator)) {
+      statusEl.textContent = 'Geolocation not supported in this browser.';
+      log('navigator.geolocation is missing.');
+      return;
+    }
+
+    statusEl.textContent = 'Requesting location…';
+    log('Calling navigator.geolocation.watchPosition…');
+
+    const geoId = navigator.geolocation.watchPosition(
+      pos => {
+        log('watchPosition SUCCESS fired.');
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+        const acc = pos.coords.accuracy;
+        log(`Position: lat=${lat}, lon=${lon}, acc=${acc}m`);
+
+        const timestamp = performance.now() / 1000.0;
+
+        if (!window.addSample) {
+          log('addSample not ready yet (WASM still loading).');
+          return;
+        }
+
+        const speedMs = window.addSample(lat, lon, timestamp);
+        if (speedMs < 0) {
+          statusEl.textContent = 'Collecting initial data… move a bit.';
+          return;
+        }
+
+        const speedKmh = window.msToKmh(speedMs);
+        speedKmEl.textContent = speedKmh.toFixed(2) + ' km/h';
+        speedMsEl.textContent = speedMs.toFixed(2) + ' m/s';
+        statusEl.textContent = 'Last update: ' + new Date().toLocaleTimeString();
+      },
+      err => {
+        log('watchPosition ERROR fired: ' + err.code + ' ' + err.message);
+        statusEl.textContent = 'Error getting position: ' + err.message;
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 1000,
+        timeout: 15000
+      }
+    );
+
+    // Safety timeout: if nothing happens in 10 seconds, show hint
+    setTimeout(() => {
+      if (statusEl.textContent === 'Requesting location…') {
+        log('No SUCCESS/ERROR after 10s. Likely permissions / HTTPS issue.');
+        statusEl.textContent = 'Still waiting for location… check HTTPS and iOS location settings.';
+      }
+    }, 10000);
+  }
+
+  startBtn.addEventListener('click', () => {
+    startBtn.disabled = true;
+    startGeolocation();
+  });
+
+  resetBtn.addEventListener('click', () => {
+    if (window.resetState) window.resetState();
+    speedKmEl.textContent = '0.0 km/h';
+    speedMsEl.textContent = '0.0 m/s';
+    statusEl.textContent = 'State reset. Tap "Start tracking" again.';
+    startBtn.disabled = false;
+    log('State reset.');
+  });
+</script>
+</body>
+</html>
